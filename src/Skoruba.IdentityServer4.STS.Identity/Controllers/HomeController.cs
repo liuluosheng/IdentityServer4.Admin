@@ -29,7 +29,11 @@ namespace Skoruba.IdentityServer4.STS.Identity.Controllers
         {
             return View();
         }
-
+        [Route("admin")]
+        public IActionResult Admin()
+        {
+            return View();
+        }
         [HttpPost]
         public IActionResult SetLanguage(string culture, string returnUrl)
         {

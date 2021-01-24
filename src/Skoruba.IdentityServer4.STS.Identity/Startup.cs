@@ -14,6 +14,13 @@ using Skoruba.IdentityServer4.STS.Identity.Helpers;
 using System;
 using Microsoft.AspNetCore.DataProtection;
 using Skoruba.IdentityServer4.Shared.Helpers;
+using Skoruba.IdentityServer4.Admin.EntityFramework.Repositories.Interfaces;
+using Skoruba.IdentityServer4.Admin.EntityFramework.Repositories;
+using Skoruba.IdentityServer4.Admin.BusinessLogic.Services.Interfaces;
+using Skoruba.IdentityServer4.Admin.BusinessLogic.Services;
+using Skoruba.AuditLogging.EntityFramework.Entities;
+using Skoruba.IdentityServer4.Shared.Dtos.Identity;
+using Skoruba.IdentityServer4.Shared.Dtos;
 
 namespace Skoruba.IdentityServer4.STS.Identity
 {
@@ -35,8 +42,23 @@ namespace Skoruba.IdentityServer4.STS.Identity
             // Register DbContexts for IdentityServer and Identity
             RegisterDbContexts(services);
 
+
             // Save data protection keys to db, using a common application name shared between Admin and STS
             services.AddDataProtection<IdentityServerDataProtectionDbContext>(Configuration);
+
+            services.RegisterAdminDbContexts<AdminIdentityDbContext, IdentityServerConfigurationDbContext, IdentityServerPersistedGrantDbContext, AdminLogDbContext, AdminAuditLogDbContext, IdentityServerDataProtectionDbContext>(Configuration);
+
+            // Add all dependencies for IdentityServer Admin
+            services.AddAdminServices<IdentityServerConfigurationDbContext, IdentityServerPersistedGrantDbContext, AdminLogDbContext>();
+
+            // Add all dependencies for Asp.Net Core Identity
+            // If you want to change primary keys or use another db model for Asp.Net Core Identity:
+            services.AddAdminAspNetIdentityServices<AdminIdentityDbContext, IdentityServerPersistedGrantDbContext,
+                IdentityUserDto, IdentityRoleDto, UserIdentity, UserIdentityRole, string, UserIdentityUserClaim, UserIdentityUserRole,
+                                UserIdentityUserLogin, UserIdentityRoleClaim, UserIdentityUserToken,
+                                IdentityUsersDto, IdentityRolesDto, IdentityUserRolesDto,
+                                IdentityUserClaimsDto, IdentityUserProviderDto, IdentityUserProvidersDto, IdentityUserChangePasswordDto,
+                                IdentityRoleClaimsDto, IdentityUserClaimDto, IdentityRoleClaimDto>();
 
             // Add email senders which is currently setup for SendGrid and SMTP
             services.AddEmailSenders(Configuration);
@@ -47,13 +69,21 @@ namespace Skoruba.IdentityServer4.STS.Identity
             // Add HSTS options
             RegisterHstsOptions(services);
 
+
             // Add all dependencies for Asp.Net Core Identity in MVC - these dependencies are injected into generic Controllers
             // Including settings for MVC and Localization
             // If you want to change primary keys or use another db model for Asp.Net Core Identity:
-            services.AddMvcWithLocalization<UserIdentity, string>(Configuration);
-
+            services.AddMvcWithLocalization<IdentityUserDto, IdentityRoleDto,
+                UserIdentity, UserIdentityRole, string, UserIdentityUserClaim, UserIdentityUserRole,
+                UserIdentityUserLogin, UserIdentityRoleClaim, UserIdentityUserToken,
+                IdentityUsersDto, IdentityRolesDto, IdentityUserRolesDto,
+                IdentityUserClaimsDto, IdentityUserProviderDto, IdentityUserProvidersDto, IdentityUserChangePasswordDto,
+                IdentityRoleClaimsDto, IdentityUserClaimDto, IdentityRoleClaimDto>(Configuration);
             // Add authorization policies for MVC
             RegisterAuthorization(services);
+
+            // Add audit logging
+            services.AddAuditEventLogging<AdminAuditLogDbContext, AuditLog>(Configuration);
 
             services.AddIdSHealthChecks<IdentityServerConfigurationDbContext, IdentityServerPersistedGrantDbContext, AdminIdentityDbContext, IdentityServerDataProtectionDbContext>(Configuration);
         }

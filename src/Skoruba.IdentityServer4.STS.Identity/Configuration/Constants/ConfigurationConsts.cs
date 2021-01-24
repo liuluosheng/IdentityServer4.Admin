@@ -21,5 +21,8 @@
         public const string AdvancedConfigurationKey = "AdvancedConfiguration";
 
         public const string CspTrustedDomainsKey = "CspTrustedDomains";
+
+        public const string AdminAuditLogDbConnectionStringKey = "AdminAuditLogDbConnection";
+        public const string AdminLogDbConnectionStringKey = "AdminLogDbConnection";
     }
 }

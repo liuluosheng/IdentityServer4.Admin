@@ -37,18 +37,121 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.IdentityModel.Tokens;
 using Skoruba.IdentityServer4.Shared.Authentication;
 using Skoruba.IdentityServer4.Shared.Configuration.Identity;
+using Skoruba.AuditLogging.EntityFramework.Entities;
+using Skoruba.AuditLogging.EntityFramework.DbContexts;
+using Skoruba.AuditLogging.EntityFramework.Extensions;
+using Skoruba.AuditLogging.EntityFramework.Repositories;
+using Skoruba.IdentityServer4.Admin.EntityFramework.Repositories.Interfaces;
+using Skoruba.IdentityServer4.Admin.BusinessLogic.Services.Interfaces;
+using Skoruba.IdentityServer4.Admin.BusinessLogic.Services;
+using Skoruba.IdentityServer4.Admin.EntityFramework.Repositories;
+using Skoruba.AuditLogging.EntityFramework.Services;
+using Skoruba.IdentityServer4.Admin.Configuration;
+using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Dtos.Identity;
 
 namespace Skoruba.IdentityServer4.STS.Identity.Helpers
 {
     public static class StartupHelpers
     {
+
+        public static IServiceCollection AddAuditEventLogging<TAuditLoggingDbContext, TAuditLog>(this IServiceCollection services, IConfiguration configuration)
+            where TAuditLog : AuditLog, new()
+            where TAuditLoggingDbContext : IAuditLoggingDbContext<TAuditLog>
+        {
+            var auditLoggingConfiguration = configuration.GetSection(nameof(AuditLoggingConfiguration)).Get<AuditLoggingConfiguration>();
+
+            services.AddAuditLogging(options => { options.Source = auditLoggingConfiguration.Source; })
+                .AddDefaultHttpEventData(subjectOptions =>
+                {
+                    subjectOptions.SubjectIdentifierClaim = auditLoggingConfiguration.SubjectIdentifierClaim;
+                    subjectOptions.SubjectNameClaim = auditLoggingConfiguration.SubjectNameClaim;
+                },
+                    actionOptions =>
+                    {
+                        actionOptions.IncludeFormVariables = auditLoggingConfiguration.IncludeFormVariables;
+                    })
+                .AddAuditSinks<DatabaseAuditEventLoggerSink<TAuditLog>>();
+
+            // repository for library
+            services.AddTransient<IAuditLoggingRepository<TAuditLog>, AuditLoggingRepository<TAuditLoggingDbContext, TAuditLog>>();
+
+            // repository and service for admin
+            services.AddTransient<IAuditLogRepository<TAuditLog>, AuditLogRepository<TAuditLoggingDbContext, TAuditLog>>();
+            services.AddTransient<IAuditLogService, AuditLogService<TAuditLog>>();
+
+            return services;
+        }
+        /// <summary>
+        /// Register DbContexts for IdentityServer ConfigurationStore and PersistedGrants, Identity and Logging
+        /// Configure the connection strings in AppSettings.json
+        /// </summary>
+        /// <typeparam name="TConfigurationDbContext"></typeparam>
+        /// <typeparam name="TPersistedGrantDbContext"></typeparam>
+        /// <typeparam name="TLogDbContext"></typeparam>
+        /// <typeparam name="TIdentityDbContext"></typeparam>
+        /// <typeparam name="TAuditLoggingDbContext"></typeparam>
+        /// <param name="services"></param>
+        /// <param name="configuration"></param>
+        public static void RegisterAdminDbContexts<TIdentityDbContext, TConfigurationDbContext, TPersistedGrantDbContext, TLogDbContext, TAuditLoggingDbContext, TDataProtectionDbContext>(this IServiceCollection services, IConfiguration configuration)
+            where TIdentityDbContext : DbContext
+            where TPersistedGrantDbContext : DbContext, IAdminPersistedGrantDbContext
+            where TConfigurationDbContext : DbContext, IAdminConfigurationDbContext
+            where TLogDbContext : DbContext, IAdminLogDbContext
+            where TAuditLoggingDbContext : DbContext, IAuditLoggingDbContext<AuditLog>
+            where TDataProtectionDbContext : DbContext, IDataProtectionKeyContext
+        {
+            var databaseProvider = configuration.GetSection(nameof(DatabaseProviderConfiguration)).Get<DatabaseProviderConfiguration>();
+
+            var identityConnectionString = configuration.GetConnectionString(ConfigurationConsts.IdentityDbConnectionStringKey);
+            var configurationConnectionString = configuration.GetConnectionString(ConfigurationConsts.ConfigurationDbConnectionStringKey);
+            var persistedGrantsConnectionString = configuration.GetConnectionString(ConfigurationConsts.PersistedGrantDbConnectionStringKey);
+            var errorLoggingConnectionString = configuration.GetConnectionString(ConfigurationConsts.AdminLogDbConnectionStringKey);
+            var auditLoggingConnectionString = configuration.GetConnectionString(ConfigurationConsts.AdminAuditLogDbConnectionStringKey);
+            var dataProtectionConnectionString = configuration.GetConnectionString(ConfigurationConsts.DataProtectionDbConnectionStringKey);
+
+            switch (databaseProvider.ProviderType)
+            {
+                case DatabaseProviderType.SqlServer:
+                    services.RegisterSqlServerDbContexts<TIdentityDbContext, TConfigurationDbContext, TPersistedGrantDbContext, TLogDbContext, TAuditLoggingDbContext, TDataProtectionDbContext>(identityConnectionString, configurationConnectionString, persistedGrantsConnectionString, errorLoggingConnectionString, auditLoggingConnectionString, dataProtectionConnectionString);
+                    break;
+                case DatabaseProviderType.PostgreSQL:
+                    services.RegisterNpgSqlDbContexts<TIdentityDbContext, TConfigurationDbContext, TPersistedGrantDbContext, TLogDbContext, TAuditLoggingDbContext, TDataProtectionDbContext>(identityConnectionString, configurationConnectionString, persistedGrantsConnectionString, errorLoggingConnectionString, auditLoggingConnectionString, dataProtectionConnectionString);
+                    break;
+                case DatabaseProviderType.MySql:
+                    services.RegisterMySqlDbContexts<TIdentityDbContext, TConfigurationDbContext, TPersistedGrantDbContext, TLogDbContext, TAuditLoggingDbContext, TDataProtectionDbContext>(identityConnectionString, configurationConnectionString, persistedGrantsConnectionString, errorLoggingConnectionString, auditLoggingConnectionString, dataProtectionConnectionString);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(databaseProvider.ProviderType), $@"The value needs to be one of {string.Join(", ", Enum.GetNames(typeof(DatabaseProviderType)))}.");
+            }
+        }
+
         /// <summary>
         /// Register services for MVC and localization including available languages
         /// </summary>
         /// <param name="services"></param>
-        public static IMvcBuilder AddMvcWithLocalization<TUser, TKey>(this IServiceCollection services, IConfiguration configuration)
-            where TUser : IdentityUser<TKey>
-            where TKey : IEquatable<TKey>
+        public static IMvcBuilder AddMvcWithLocalization<TUserDto, TRoleDto, TUser, TRole, TKey, TUserClaim, TUserRole, TUserLogin, TRoleClaim, TUserToken,
+     TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
+     TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto>(this IServiceCollection services, IConfiguration configuration)
+     where TUserDto : UserDto<TKey>, new()
+     where TRoleDto : RoleDto<TKey>, new()
+     where TUser : IdentityUser<TKey>
+     where TRole : IdentityRole<TKey>
+     where TKey : IEquatable<TKey>
+     where TUserClaim : IdentityUserClaim<TKey>
+     where TUserRole : IdentityUserRole<TKey>
+     where TUserLogin : IdentityUserLogin<TKey>
+     where TRoleClaim : IdentityRoleClaim<TKey>
+     where TUserToken : IdentityUserToken<TKey>
+     where TUsersDto : UsersDto<TUserDto, TKey>
+     where TRolesDto : RolesDto<TRoleDto, TKey>
+     where TUserRolesDto : UserRolesDto<TRoleDto, TKey>
+     where TUserClaimsDto : UserClaimsDto<TUserClaimDto, TKey>
+     where TUserProviderDto : UserProviderDto<TKey>
+     where TUserProvidersDto : UserProvidersDto<TUserProviderDto, TKey>
+     where TUserChangePasswordDto : UserChangePasswordDto<TKey>
+     where TRoleClaimsDto : RoleClaimsDto<TRoleClaimDto, TKey>
+     where TUserClaimDto : UserClaimDto<TKey>
+     where TRoleClaimDto : RoleClaimDto<TKey>
         {
             services.AddLocalization(opts => { opts.ResourcesPath = ConfigurationConsts.ResourcesPath; });
 
@@ -64,7 +167,9 @@ namespace Skoruba.IdentityServer4.STS.Identity.Helpers
                 .AddDataAnnotationsLocalization()
                 .ConfigureApplicationPartManager(m =>
                 {
-                    m.FeatureProviders.Add(new GenericTypeControllerFeatureProvider<TUser, TKey>());
+                    m.FeatureProviders.Add(new GenericTypeControllerFeatureProvider<TUserDto, TRoleDto, TUser, TRole, TKey, TUserClaim, TUserRole, TUserLogin, TRoleClaim, TUserToken,
+                         TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
+                         TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto>());
                 });
 
             var cultureConfiguration = configuration.GetSection(nameof(CultureConfiguration)).Get<CultureConfiguration>();
@@ -384,16 +489,16 @@ namespace Skoruba.IdentityServer4.STS.Identity.Helpers
 
             if (externalProviderConfiguration.UseAzureAdProvider)
             {
-                authenticationBuilder.AddAzureAD(AzureADDefaults.AuthenticationScheme, AzureADDefaults.OpenIdScheme, AzureADDefaults.CookieScheme, AzureADDefaults.DisplayName,options =>
-                    {
-                        options.ClientSecret = externalProviderConfiguration.AzureAdSecret;
-                        options.ClientId = externalProviderConfiguration.AzureAdClientId;
-                        options.TenantId = externalProviderConfiguration.AzureAdTenantId;
-                        options.Instance = externalProviderConfiguration.AzureInstance;
-                        options.Domain = externalProviderConfiguration.AzureDomain;
-                        options.CallbackPath = externalProviderConfiguration.AzureAdCallbackPath;
-                        options.CookieSchemeName = IdentityConstants.ExternalScheme;
-                    });
+                authenticationBuilder.AddAzureAD(AzureADDefaults.AuthenticationScheme, AzureADDefaults.OpenIdScheme, AzureADDefaults.CookieScheme, AzureADDefaults.DisplayName, options =>
+                     {
+                         options.ClientSecret = externalProviderConfiguration.AzureAdSecret;
+                         options.ClientId = externalProviderConfiguration.AzureAdClientId;
+                         options.TenantId = externalProviderConfiguration.AzureAdTenantId;
+                         options.Instance = externalProviderConfiguration.AzureInstance;
+                         options.Domain = externalProviderConfiguration.AzureDomain;
+                         options.CallbackPath = externalProviderConfiguration.AzureAdCallbackPath;
+                         options.CookieSchemeName = IdentityConstants.ExternalScheme;
+                     });
             }
         }
 
